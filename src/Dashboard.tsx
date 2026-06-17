@@ -643,6 +643,8 @@ function SettingsModal({
   range: TimeRange
   onRangeChange: (r: TimeRange) => void
 }) {
+  const { language, t } = useTranslation()
+
   useEffect(() => {
     if (!open) return
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
@@ -651,8 +653,6 @@ function SettingsModal({
   }, [open, onClose])
 
   if (!open) return null
-
-  const { language, t } = useTranslation()
 
   return (
     <div className="fixed inset-0 z-[140] flex items-start justify-center pt-24 px-4">

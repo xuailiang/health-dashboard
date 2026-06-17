@@ -485,7 +485,7 @@ export default function Correlations({ metrics, sleepRecords, caffeineRecords, d
       'VO2 Max → Resting HR', 'Higher fitness level is associated with lower resting HR')
 
     return results.sort((a, b) => Math.abs(b.r) - Math.abs(a.r))
-  }, [sleepHrvData, sleepHrData, exerciseHrData, exerciseHrvData, exerciseSleepData, caffeineSleepData, stepsSleepData, stepsHrData, daylightSleepData, daylightHrvData, sleepDisturbanceData, vo2HrData])
+  }, [sleepHrvData, sleepHrData, exerciseHrData, exerciseHrvData, exerciseSleepData, stepsSleepData, stepsHrData, daylightSleepData, daylightHrvData, sleepDisturbanceData, vo2HrData, language])
 
   const ct = useChartTheme()
 
@@ -513,12 +513,6 @@ export default function Correlations({ metrics, sleepRecords, caffeineRecords, d
     return result
   }, [metrics, sleepByDate])
 
-  const hasData = correlations.length > 0
-
-  if (!hasData) {
-    return <div className="text-zinc-500 text-center py-20">{t('notEnoughData')}</div>
-  }
-
   // Build chart configs keyed by label
   const chartConfigs = useMemo(() => {
     const configs: Record<string, ChartConfig> = {}
@@ -535,6 +529,12 @@ export default function Correlations({ metrics, sleepRecords, caffeineRecords, d
     if (vo2HrData.length >= 10) configs['VO2 Max → Resting HR'] = { data: vo2HrData, xKey: 'vo2', yKey: 'hr', xName: 'VO2 Max', yName: 'Resting HR', xUnit: ' mL/kg/min', yUnit: ' bpm', color: '#22c55e', zRange: [25, 50] }
     return configs
   }, [sleepHrvData, sleepHrData, exerciseHrData, exerciseHrvData, exerciseSleepData, stepsSleepData, stepsHrData, daylightSleepData, daylightHrvData, sleepDisturbanceData, vo2HrData])
+
+  const hasData = correlations.length > 0
+
+  if (!hasData) {
+    return <div className="text-zinc-500 text-center py-20">{t('notEnoughData')}</div>
+  }
 
   // Separate meaningful from weak
   const meaningful = correlations.filter(c => Math.abs(c.r) > 0.15)

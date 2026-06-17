@@ -90,6 +90,9 @@ const STAGE_MAP: Record<string, SleepRecord['stage']> = {
   HKCategoryValueSleepAnalysisAsleepUnspecified: 'unspecified',
 }
 
+export const CHUNK_SIZE = 64 * 1024 * 1024
+export const HR_TIMELINE_SAMPLE_MS = 15_000
+
 self.onmessage = async (e: MessageEvent) => {
   const file: File = e.data.file
   try {
@@ -121,12 +124,13 @@ async function parseFile(file: File) {
   const mobilityAcc = new Map<string, { walkingSpeed: number[]; stepLength: number[]; doubleSupportPct: number[]; asymmetryPct: number[]; stairAscent: number[]; stairDescent: number[]; steadiness: number[]; sixMinWalk: number[]; flights: number }>()
   const runningAcc = new Map<string, { power: number[]; speed: number[]; vertOsc: number[]; groundContact: number[]; strideLen: number[] }>()
 
-  let profile = { dob: '', sex: '', bloodType: '' }
+  const profile = { dob: '', sex: '', bloodType: '' }
   let exportDate = ''
   let recordCount = 0
 
-  const CHUNK_SIZE = 64 * 1024 * 1024
   let remainder = ''
+  let workoutRemainder = ''
+  let lastHrTimelineAt = -Infinity
   const totalBytes = file.size
 
   for (let offset = 0; offset < file.size; offset += CHUNK_SIZE) {
@@ -394,7 +398,11 @@ async function parseFile(file: File) {
           } else {
             dailyHRAcc.set(day, { min: value, max: value, sum: value, count: 1 })
           }
-          hrTimeline.push({ t: parseAppleDate(startDate), v: Math.round(value) })
+          const t = parseAppleDate(startDate)
+          if (Number.isFinite(t) && t - lastHrTimelineAt >= HR_TIMELINE_SAMPLE_MS) {
+            hrTimeline.push({ t, v: Math.round(value) })
+            lastHrTimelineAt = t
+          }
           break
         }
         case 'HKQuantityTypeIdentifierAppleSleepingWristTemperature':
@@ -428,9 +436,24 @@ async function parseFile(file: File) {
       }
     }
 
+    // Parse <Workout> elements (full blocks including inner stats). Keep an
+    // independent remainder because a Workout can span chunk boundaries.
+    const workoutText = workoutRemainder + processText
+    const lastWorkoutStart = workoutText.lastIndexOf('<Workout')
+    let safeWorkoutEnd = workoutText.length
+    if (lastWorkoutStart !== -1) {
+      const selfClosingEnd = workoutText.indexOf('/>', lastWorkoutStart)
+      const blockEnd = workoutText.indexOf('</Workout>', lastWorkoutStart)
+      const hasCompleteSelfClosing = selfClosingEnd !== -1 && (blockEnd === -1 || selfClosingEnd < blockEnd)
+      const hasCompleteBlock = blockEnd !== -1
+      if (!hasCompleteSelfClosing && !hasCompleteBlock) safeWorkoutEnd = lastWorkoutStart
+    }
+    const workoutProcessText = workoutText.slice(0, safeWorkoutEnd)
+    workoutRemainder = workoutText.slice(safeWorkoutEnd)
+
     // Parse <Workout> elements (full blocks including inner stats)
     const workoutBlockRegex = /<Workout\s+([^>]+?)(?:\/>|>([\s\S]*?)<\/Workout>)/g
-    while ((match = workoutBlockRegex.exec(processText)) !== null) {
+    while ((match = workoutBlockRegex.exec(workoutProcessText)) !== null) {
       const attrs = match[1]
       const inner = match[2] || ''
       const activityType = extractAttr(attrs, 'workoutActivityType') || ''
@@ -693,8 +716,14 @@ async function parseFile(file: File) {
   } as ParseComplete)
 }
 
-function extractAttr(str: string, name: string): string {
-  const regex = new RegExp(`${name}="([^"]*)"`)
+const attrRegexCache = new Map<string, RegExp>()
+
+export function extractAttr(str: string, name: string): string {
+  let regex = attrRegexCache.get(name)
+  if (!regex) {
+    regex = new RegExp(`${name}="([^"]*)"`)
+    attrRegexCache.set(name, regex)
+  }
   const match = str.match(regex)
   return match ? match[1] : ''
 }

@@ -279,6 +279,7 @@ export interface HealthData {
   runningDynamics: RunningDynamicsRecord[]
   gpxFiles: Map<string, File> // filename -> File
   ecgFiles: Map<string, File> // filename -> File
+  routeFilesAvailable?: boolean
   exportDate: string
   sourceMode?: 'apple' | 'garmin'
   garminMetrics?: GarminMetrics

@@ -3,6 +3,16 @@ import type { ReactNode } from 'react'
 import { ResponsiveContainer } from 'recharts'
 import { ArrowUpRight, ArrowDownRight } from 'lucide-react'
 import { useTranslation } from './lib/i18n'
+import {
+  clearStoredAiKey,
+  getStoredAiBaseUrl,
+  getStoredAiKey,
+  getStoredAiModel,
+  hasEnvAiKey,
+  setStoredAiBaseUrl,
+  setStoredAiKey,
+  setStoredAiModel,
+} from './aiConfig'
 
 // === Colors ===
 export const COLORS = {
@@ -268,44 +278,6 @@ export function ProgressBar({ value, max = 1 }: { value: number; max?: number })
   )
 }
 
-const AI_KEY_STORAGE = 'health-dashboard-ai-key'
-const AI_URL_STORAGE = 'health-dashboard-ai-url'
-const AI_MODEL_STORAGE = 'health-dashboard-ai-model'
-
-function getApiKey(): string | null {
-  const envKey = import.meta.env.VITE_OPENROUTER_API_KEY as string | undefined
-  if (envKey) return envKey
-  return localStorage.getItem(AI_KEY_STORAGE)
-}
-
-function hasEnvKey(): boolean {
-  return !!import.meta.env.VITE_OPENROUTER_API_KEY
-}
-
-function setApiKey(key: string) {
-  localStorage.setItem(AI_KEY_STORAGE, key)
-}
-
-function getAiBaseUrl(): string {
-  const envUrl = import.meta.env.VITE_AI_BASE_URL as string | undefined
-  if (envUrl) return envUrl
-  return localStorage.getItem(AI_URL_STORAGE) || 'https://openrouter.ai/api/v1'
-}
-
-function setAiBaseUrl(url: string) {
-  localStorage.setItem(AI_URL_STORAGE, url)
-}
-
-function getAiModel(defaultModel = 'anthropic/claude-sonnet-4'): string {
-  const envModel = import.meta.env.VITE_AI_MODEL as string | undefined
-  if (envModel) return envModel
-  return localStorage.getItem(AI_MODEL_STORAGE) || defaultModel
-}
-
-function setAiModel(model: string) {
-  localStorage.setItem(AI_MODEL_STORAGE, model)
-}
-
 function sampleData(data: unknown[], maxPoints = 60): unknown[] {
   if (data.length <= maxPoints) return data
   const step = Math.ceil(data.length / maxPoints)
@@ -399,7 +371,21 @@ function parseMarkdownToReact(text: string): React.ReactNode[] {
   })
 }
 
-function extractContent(body: any): string {
+type AIResponseBody = {
+  choices?: Array<{
+    finish_reason?: string
+    message?: {
+      content?: string
+      reasoning_content?: string
+      text?: string
+    }
+    text?: string
+  }>
+  candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>
+  content?: Array<{ text?: string }> | string
+}
+
+function extractContent(body: AIResponseBody | string | null): string {
   if (!body) return ''
   
   // 1. OpenAI / DeepSeek / OpenRouter 格式 (有内容时)
@@ -472,8 +458,8 @@ ${chartLabel}: "${title}"${description ? `\n${descLabel}: ${description}` : ''}
 ${dataLabel} (${data.length} ${pointLabel}${data.length > 60 ? `，${sampledLabel}` : ''}):
 ${JSON.stringify(sampled, null, 0)}`
 
-  const baseUrl = getAiBaseUrl()
-  const model = getAiModel('anthropic/claude-sonnet-4')
+  const baseUrl = getStoredAiBaseUrl()
+  const model = getStoredAiModel()
 
   const res = await fetch(`${baseUrl}/chat/completions`, {
     method: 'POST',
@@ -491,7 +477,7 @@ ${JSON.stringify(sampled, null, 0)}`
   if (!res.ok) {
     const err = await res.json().catch(() => ({}))
     if (res.status === 401) {
-      if (!hasEnvKey()) localStorage.removeItem(AI_KEY_STORAGE)
+      if (!hasEnvAiKey()) clearStoredAiKey()
       throw new Error('Invalid API key. Please try again.')
     }
     throw new Error((err as { error?: { message?: string } }).error?.message || `API error ${res.status}`)
@@ -521,8 +507,8 @@ export function AISummaryButton({ title, description, chartData }: {
   const [askingKey, setAskingKey] = useState(false)
   const [keyInput, setKeyInput] = useState('')
   const [showAdvanced, setShowAdvanced] = useState(false)
-  const [urlInput, setUrlInput] = useState(() => getAiBaseUrl())
-  const [modelInput, setModelInput] = useState(() => getAiModel('anthropic/claude-sonnet-4'))
+  const [urlInput, setUrlInput] = useState(() => getStoredAiBaseUrl())
+  const [modelInput, setModelInput] = useState(() => getStoredAiModel())
   const panelRef = useRef<HTMLDivElement>(null)
 
   const close = useCallback(() => {
@@ -532,8 +518,8 @@ export function AISummaryButton({ title, description, chartData }: {
     setAskingKey(false)
     setKeyInput('')
     setShowAdvanced(false)
-    setUrlInput(getAiBaseUrl())
-    setModelInput(getAiModel('anthropic/claude-sonnet-4'))
+    setUrlInput(getStoredAiBaseUrl())
+    setModelInput(getStoredAiModel())
   }, [])
 
   useEffect(() => {
@@ -561,7 +547,7 @@ export function AISummaryButton({ title, description, chartData }: {
   const handleClick = useCallback(() => {
     if (open) { close(); return }
     setOpen(true)
-    const key = getApiKey()
+    const key = getStoredAiKey()
     if (key) {
       requestSummary(key)
     } else {
@@ -572,9 +558,9 @@ export function AISummaryButton({ title, description, chartData }: {
   const handleKeySubmit = useCallback(() => {
     const key = keyInput.trim()
     if (!key) return
-    setApiKey(key)
-    setAiBaseUrl(urlInput.trim())
-    setAiModel(modelInput.trim())
+    setStoredAiKey(key)
+    setStoredAiBaseUrl(urlInput.trim())
+    setStoredAiModel(modelInput.trim())
     setAskingKey(false)
     requestSummary(key)
   }, [keyInput, urlInput, modelInput, requestSummary])
@@ -595,7 +581,7 @@ export function AISummaryButton({ title, description, chartData }: {
           {askingKey ? (
             <div className="space-y-2">
               <p className="text-xs text-zinc-400">
-                {language === 'zh' ? '请输入 Anthropic API 密钥以启用 AI 总结：' : 'Enter your Anthropic API key to enable AI summaries:'}
+                {language === 'zh' ? '请输入 API 密钥以启用 AI 总结：' : 'Enter an API key to enable AI summaries:'}
               </p>
               <input
                 type="password"
@@ -666,8 +652,10 @@ export function AISummaryButton({ title, description, chartData }: {
                 </div>
               )}
 
-              <p className="text-[10px] text-zinc-600">
-                {language === 'zh' ? '配置参数仅在你的浏览器本地存储。' : 'Settings are stored locally in your browser only.'}
+              <p className="text-[10px] text-zinc-600 leading-relaxed">
+                {language === 'zh'
+                  ? '配置参数仅保存在本浏览器。点击开始后，当前图表的抽样数据会发送到你配置的 AI 接口。'
+                  : 'Settings stay in this browser. Starting a summary sends sampled chart data to your configured AI endpoint.'}
               </p>
             </div>
           ) : loading ? (
@@ -678,7 +666,7 @@ export function AISummaryButton({ title, description, chartData }: {
           ) : error ? (
             <div className="space-y-2">
               <p className="text-xs text-red-400">{error}</p>
-              <button onClick={() => { const k = getApiKey(); if (k) requestSummary(k); else setAskingKey(true); }} className="text-xs text-zinc-400 hover:text-zinc-200 transition-colors">
+              <button onClick={() => { const k = getStoredAiKey(); if (k) requestSummary(k); else setAskingKey(true); }} className="text-xs text-zinc-400 hover:text-zinc-200 transition-colors">
                 {language === 'zh' ? '重试' : 'Retry'}
               </button>
             </div>

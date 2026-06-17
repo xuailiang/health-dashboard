@@ -4,6 +4,14 @@ import { TabHeader } from './ui'
 import { computeHealthScores, scoreLabel, type HealthScore } from './healthScore'
 import { Sparkles, Key, Loader2, MessageCircle, Send, Download, Copy, Check } from 'lucide-react'
 import { useTranslation } from './lib/i18n'
+import {
+  getStoredAiBaseUrl,
+  getStoredAiKey,
+  getStoredAiModel,
+  setStoredAiBaseUrl,
+  setStoredAiKey,
+  setStoredAiModel,
+} from './aiConfig'
 
 const CACHE_KEY = 'health_chat_cache'
 const CACHE_TTL = 10 * 60 * 1000 // 10 minutes
@@ -187,17 +195,9 @@ interface Props {
 
 export default function AIInsights({ data, metrics }: Props) {
   const { language, t } = useTranslation()
-  const [apiKey, setApiKey] = useState(() => sessionStorage.getItem('openrouter_key') || '')
-  const [baseUrl, setBaseUrl] = useState(() => {
-    return (import.meta.env.VITE_AI_BASE_URL as string | undefined) || 
-           sessionStorage.getItem('ai_base_url') || 
-           'https://openrouter.ai/api/v1'
-  })
-  const [model, setModel] = useState(() => {
-    return (import.meta.env.VITE_AI_MODEL as string | undefined) || 
-           sessionStorage.getItem('ai_model_name') || 
-           'anthropic/claude-sonnet-4.6'
-  })
+  const [apiKey, setApiKey] = useState(() => getStoredAiKey() || '')
+  const [baseUrl, setBaseUrl] = useState(() => getStoredAiBaseUrl())
+  const [model, setModel] = useState(() => getStoredAiModel())
   const [showAdvanced, setShowAdvanced] = useState(false)
   const [messages, setMessages] = useState<ChatMessage[]>(() => loadCache()?.messages || [])
   const [loading, setLoading] = useState(false)
@@ -214,7 +214,7 @@ export default function AIInsights({ data, metrics }: Props) {
       copy: 'Copy',
       export: 'Export',
       placeholderKey: 'sk-or-...',
-      keyNote: 'Stored in session memory only. Chat cached for 10 min.',
+      keyNote: 'Stored in this browser. Your summarized health context is sent to the configured AI endpoint only when you ask.',
       askTitle: 'Ask about your health data',
       analyzing: 'Analyzing your data...',
       placeholderAsk: 'Ask a follow-up question...',
@@ -228,7 +228,7 @@ export default function AIInsights({ data, metrics }: Props) {
       copy: '复制',
       export: '导出',
       placeholderKey: '请输入你的 OpenRouter API 密钥（如 sk-or-...）',
-      keyNote: '密钥仅保存在当前浏览器会话中。对话将在 10 分钟内缓存。',
+      keyNote: '密钥保存在本浏览器。只有在你提问时，健康数据摘要才会发送到配置的 AI 接口。',
       askTitle: '选择预设健康问题开始提问',
       analyzing: '正在深度分析数据中...',
       placeholderAsk: '向 AI 追问关于你健康数据的问题...',
@@ -254,7 +254,7 @@ export default function AIInsights({ data, metrics }: Props) {
 
   const saveKey = useCallback((key: string) => {
     setApiKey(key)
-    if (key) sessionStorage.setItem('openrouter_key', key)
+    if (key) setStoredAiKey(key, 'local')
   }, [])
 
   const ask = useCallback(async (question: string) => {
@@ -426,7 +426,7 @@ export default function AIInsights({ data, metrics }: Props) {
                 value={baseUrl}
                 onChange={e => {
                   setBaseUrl(e.target.value)
-                  sessionStorage.setItem('ai_base_url', e.target.value)
+                  setStoredAiBaseUrl(e.target.value, 'local')
                 }}
                 placeholder="https://api.deepseek.com/v1"
                 className="w-full bg-zinc-850 border border-zinc-700 rounded-lg px-3 py-1.5 text-xs text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-zinc-500"
@@ -439,7 +439,7 @@ export default function AIInsights({ data, metrics }: Props) {
                 value={model}
                 onChange={e => {
                   setModel(e.target.value)
-                  sessionStorage.setItem('ai_model_name', e.target.value)
+                  setStoredAiModel(e.target.value, 'local')
                 }}
                 placeholder="deepseek-chat"
                 className="w-full bg-zinc-850 border border-zinc-700 rounded-lg px-3 py-1.5 text-xs text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-zinc-500"
@@ -449,9 +449,9 @@ export default function AIInsights({ data, metrics }: Props) {
               <button
                 onClick={() => {
                   setBaseUrl('https://api.deepseek.com/v1')
-                  sessionStorage.setItem('ai_base_url', 'https://api.deepseek.com/v1')
+                  setStoredAiBaseUrl('https://api.deepseek.com/v1', 'local')
                   setModel('deepseek-chat')
-                  sessionStorage.setItem('ai_model_name', 'deepseek-chat')
+                  setStoredAiModel('deepseek-chat', 'local')
                 }}
                 className="px-2.5 py-0.5 bg-zinc-800 hover:bg-zinc-700 text-[10px] text-zinc-300 rounded border border-zinc-700 transition-colors"
               >
@@ -460,9 +460,9 @@ export default function AIInsights({ data, metrics }: Props) {
               <button
                 onClick={() => {
                   setBaseUrl('https://openrouter.ai/api/v1')
-                  sessionStorage.setItem('ai_base_url', 'https://openrouter.ai/api/v1')
+                  setStoredAiBaseUrl('https://openrouter.ai/api/v1', 'local')
                   setModel('anthropic/claude-sonnet-4.6')
-                  sessionStorage.setItem('ai_model_name', 'anthropic/claude-sonnet-4.6')
+                  setStoredAiModel('anthropic/claude-sonnet-4.6', 'local')
                 }}
                 className="px-2.5 py-0.5 bg-zinc-800 hover:bg-zinc-700 text-[10px] text-zinc-300 rounded border border-zinc-700 transition-colors"
               >

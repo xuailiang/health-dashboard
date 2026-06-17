@@ -15,8 +15,10 @@ interface CachedData {
   timestamp: number
   data: Omit<HealthData, 'gpxFiles' | 'ecgFiles' | 'dailyMetrics'> & {
     dailyMetrics: [string, DailyMetrics][]
-    gpxFileContents: [string, string][] // [filename, text content]
-    ecgFileContents: [string, string][]
+    gpxFileNames?: string[]
+    ecgFileNames?: string[]
+    gpxFileContents?: [string, string][] // legacy cache shape
+    ecgFileContents?: [string, string][]
   }
 }
 
@@ -34,20 +36,16 @@ async function saveToCache(data: HealthData) {
     const db = await openCacheDB()
     const { gpxFiles, ecgFiles, dailyMetrics, ...rest } = data
 
-    // Read File objects into strings for storage
-    const gpxFileContents: [string, string][] = []
-    for (const [name, file] of gpxFiles) {
-      gpxFileContents.push([name, await file.text()])
-    }
-    const ecgFileContents: [string, string][] = []
-    for (const [name, file] of ecgFiles) {
-      ecgFileContents.push([name, await file.text()])
-    }
-
     const serializable: CachedData = {
       id: 'health',
       timestamp: Date.now(),
-      data: { ...rest, dailyMetrics: Array.from(dailyMetrics.entries()), gpxFileContents, ecgFileContents },
+      data: {
+        ...rest,
+        routeFilesAvailable: false,
+        dailyMetrics: Array.from(dailyMetrics.entries()),
+        gpxFileNames: Array.from(gpxFiles.keys()),
+        ecgFileNames: Array.from(ecgFiles.keys()),
+      },
     }
     const tx = db.transaction(CACHE_STORE, 'readwrite')
     tx.objectStore(CACHE_STORE).put(serializable)
@@ -68,22 +66,16 @@ async function loadFromCache(): Promise<HealthData | null> {
           resolve(null)
           return
         }
-        // Reconstruct File objects from cached strings
         const gpxFiles = new Map<string, File>()
-        for (const [name, content] of cached.data.gpxFileContents || []) {
-          gpxFiles.set(name, new File([content], name, { type: 'application/gpx+xml' }))
-        }
         const ecgFiles = new Map<string, File>()
-        for (const [name, content] of cached.data.ecgFileContents || []) {
-          ecgFiles.set(name, new File([content], name, { type: 'text/csv' }))
-        }
 
-        const { gpxFileContents: _g, ecgFileContents: _e, dailyMetrics: dm, ...rest } = cached.data
+        const { dailyMetrics: dm, ...rest } = cached.data
         resolve({
           ...rest,
           dailyMetrics: new Map(dm),
           gpxFiles,
           ecgFiles,
+          routeFilesAvailable: false,
         })
       }
       req.onerror = () => { db.close(); resolve(null) }
@@ -176,6 +168,7 @@ export default function App() {
   const [state, setState] = useState<AppState>({ phase: 'loading-cache' })
   const [dragging, setDragging] = useState(false)
   const [sourceMode, setSourceMode] = useState<SourceMode>('apple')
+  const [nowMs, setNowMs] = useState(0)
   const gpxFilesRef = useRef<Map<string, File>>(new Map())
   const ecgFilesRef = useRef<Map<string, File>>(new Map())
 
@@ -189,6 +182,13 @@ export default function App() {
       }
     })
   }, [])
+
+  useEffect(() => {
+    if (state.phase !== 'parsing') return
+    setNowMs(performance.now())
+    const id = window.setInterval(() => setNowMs(performance.now()), 1000)
+    return () => window.clearInterval(id)
+  }, [state.phase])
 
   const handleFile = useCallback((file: File) => {
     const startedAt = performance.now()
@@ -230,6 +230,7 @@ export default function App() {
             ecgFiles: ecgFilesRef.current,
             exportDate: msg.data.exportDate,
             sourceMode: 'apple',
+            routeFilesAvailable: gpxFilesRef.current.size > 0,
           }
         setState({ phase: 'ready', data: healthData })
         saveToCache(healthData)
@@ -260,8 +261,9 @@ export default function App() {
       const data = await parseGarminExport(jsonFiles, (msg) => {
         setState({ phase: 'parsing', progress: 0, currentDate: msg, bytesRead: 0, totalBytes: 0, startedAt })
       })
-      setState({ phase: 'ready', data })
-      saveToCache(data)
+      const healthData = { ...data, routeFilesAvailable: false }
+      setState({ phase: 'ready', data: healthData })
+      saveToCache(healthData)
     } catch (err) {
       setState({ phase: 'error', message: `Failed to parse Garmin data: ${err}` })
     }
@@ -517,7 +519,7 @@ export default function App() {
 
         {state.phase === 'parsing' && (() => {
           const pct = state.totalBytes > 0 ? state.bytesRead / state.totalBytes : 0
-          const elapsed = performance.now() - state.startedAt
+          const elapsed = Math.max(0, nowMs - state.startedAt)
           const rate = state.bytesRead > 0 && elapsed > 0 ? state.bytesRead / elapsed : 0
           const remaining = rate > 0 && state.totalBytes > 0 ? (state.totalBytes - state.bytesRead) / rate : 0
           const hasProgress = state.totalBytes > 0

@@ -108,7 +108,7 @@ interface Props {
   granularity: Granularity
 }
 
-export default function Cardio({ cardioRecords, dailyHR, metrics, dob, cutoffDate, granularity: _granularity }: Props) {
+export default function Cardio({ cardioRecords, dailyHR, metrics, dob, cutoffDate }: Props) {
   const { language } = useTranslation()
   const ct = useChartTheme()
 
@@ -400,7 +400,7 @@ export default function Cardio({ cardioRecords, dailyHR, metrics, dob, cutoffDat
   }
 
   // === Cardio fitness score (0-100) ===
-  const cardioScore = useMemo(() => {
+  const cardioScore = (() => {
     const components: { label: string; score: number; weight: number }[] = []
     if (avgRestingHR !== null) components.push({ label: localT('restingHR'), score: scoreRestingHR(avgRestingHR), weight: 3 })
     if (avgHRV !== null) components.push({ label: localT('hrv'), score: scoreHRV(avgHRV), weight: 3 })
@@ -410,7 +410,7 @@ export default function Cardio({ cardioRecords, dailyHR, metrics, dob, cutoffDat
     const totalWeight = components.reduce((s, c) => s + c.weight, 0)
     const weighted = components.reduce((s, c) => s + c.score * c.weight, 0) / totalWeight
     return { score: Math.round(weighted), components }
-  }, [avgRestingHR, avgHRV, latestVO2, latestRecovery, age, language])
+  })()
 
   const scoreColor = (s: number) => s >= 80 ? '#22c55e' : s >= 60 ? '#3b82f6' : s >= 40 ? '#f97316' : '#ef4444'
   const scoreLabel = (s: number) => s >= 80 ? localT('excellent') : s >= 60 ? localT('good') : s >= 40 ? localT('fair') : localT('needsWork')
