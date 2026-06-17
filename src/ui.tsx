@@ -269,6 +269,8 @@ export function ProgressBar({ value, max = 1 }: { value: number; max?: number })
 }
 
 const AI_KEY_STORAGE = 'health-dashboard-ai-key'
+const AI_URL_STORAGE = 'health-dashboard-ai-url'
+const AI_MODEL_STORAGE = 'health-dashboard-ai-model'
 
 function getApiKey(): string | null {
   const envKey = import.meta.env.VITE_OPENROUTER_API_KEY as string | undefined
@@ -282,6 +284,26 @@ function hasEnvKey(): boolean {
 
 function setApiKey(key: string) {
   localStorage.setItem(AI_KEY_STORAGE, key)
+}
+
+function getAiBaseUrl(): string {
+  const envUrl = import.meta.env.VITE_AI_BASE_URL as string | undefined
+  if (envUrl) return envUrl
+  return localStorage.getItem(AI_URL_STORAGE) || 'https://openrouter.ai/api/v1'
+}
+
+function setAiBaseUrl(url: string) {
+  localStorage.setItem(AI_URL_STORAGE, url)
+}
+
+function getAiModel(defaultModel = 'anthropic/claude-sonnet-4'): string {
+  const envModel = import.meta.env.VITE_AI_MODEL as string | undefined
+  if (envModel) return envModel
+  return localStorage.getItem(AI_MODEL_STORAGE) || defaultModel
+}
+
+function setAiModel(model: string) {
+  localStorage.setItem(AI_MODEL_STORAGE, model)
 }
 
 function sampleData(data: unknown[], maxPoints = 60): unknown[] {
@@ -298,14 +320,17 @@ Chart: "${title}"${description ? `\nDescription: ${description}` : ''}
 Their data (${data.length} points${data.length > 60 ? ', sampled' : ''}):
 ${JSON.stringify(sampled, null, 0)}`
 
-  const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+  const baseUrl = getAiBaseUrl()
+  const model = getAiModel('anthropic/claude-sonnet-4')
+
+  const res = await fetch(`${baseUrl}/chat/completions`, {
     method: 'POST',
     headers: {
       'content-type': 'application/json',
       'authorization': `Bearer ${apiKey}`,
     },
     body: JSON.stringify({
-      model: 'anthropic/claude-sonnet-4',
+      model: model,
       max_tokens: 300,
       messages: [{ role: 'user', content: prompt }],
     }),
@@ -334,6 +359,9 @@ export function AISummaryButton({ title, description, chartData }: {
   const [error, setError] = useState<string | null>(null)
   const [askingKey, setAskingKey] = useState(false)
   const [keyInput, setKeyInput] = useState('')
+  const [showAdvanced, setShowAdvanced] = useState(false)
+  const [urlInput, setUrlInput] = useState(() => getAiBaseUrl())
+  const [modelInput, setModelInput] = useState(() => getAiModel('anthropic/claude-sonnet-4'))
   const panelRef = useRef<HTMLDivElement>(null)
 
   const close = useCallback(() => {
@@ -342,6 +370,9 @@ export function AISummaryButton({ title, description, chartData }: {
     setError(null)
     setAskingKey(false)
     setKeyInput('')
+    setShowAdvanced(false)
+    setUrlInput(getAiBaseUrl())
+    setModelInput(getAiModel('anthropic/claude-sonnet-4'))
   }, [])
 
   useEffect(() => {
@@ -381,9 +412,11 @@ export function AISummaryButton({ title, description, chartData }: {
     const key = keyInput.trim()
     if (!key) return
     setApiKey(key)
+    setAiBaseUrl(urlInput.trim())
+    setAiModel(modelInput.trim())
     setAskingKey(false)
     requestSummary(key)
-  }, [keyInput, requestSummary])
+  }, [keyInput, urlInput, modelInput, requestSummary])
 
   return (
     <div className="relative">
@@ -412,16 +445,68 @@ export function AISummaryButton({ title, description, chartData }: {
                 className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-1.5 text-xs text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-zinc-500"
                 autoFocus
               />
-              <div className="flex gap-2">
-                <button onClick={handleKeySubmit} className="px-3 py-1 bg-[#0099FF] hover:bg-[#0099FF]/80 text-xs text-white rounded-lg transition-colors">
+              <div className="flex gap-2 items-center">
+                <button onClick={handleKeySubmit} className="px-3 py-1 bg-[#0099FF] hover:bg-[#0099FF]/80 text-xs text-white rounded-lg transition-colors shrink-0">
                   {language === 'zh' ? '保存并开始' : 'Save & Go'}
                 </button>
-                <button onClick={close} className="px-3 py-1 text-xs text-zinc-500 hover:text-zinc-300 transition-colors">
+                <button onClick={close} className="px-3 py-1 text-xs text-zinc-500 hover:text-zinc-300 transition-colors shrink-0">
                   {language === 'zh' ? '取消' : 'Cancel'}
                 </button>
+                <button 
+                  onClick={() => setShowAdvanced(!showAdvanced)} 
+                  className="ml-auto text-[10px] text-zinc-400 hover:text-zinc-300 underline transition-colors"
+                >
+                  {language === 'zh' ? (showAdvanced ? '隐藏设置' : '高级设置') : (showAdvanced ? 'Hide API' : 'Advanced')}
+                </button>
               </div>
+
+              {showAdvanced && (
+                <div className="space-y-2 pt-2 border-t border-zinc-800">
+                  <div className="space-y-1">
+                    <label className="text-[10px] text-zinc-500 block">API Base URL</label>
+                    <input
+                      type="text"
+                      value={urlInput}
+                      onChange={e => setUrlInput(e.target.value)}
+                      placeholder="https://api.deepseek.com/v1"
+                      className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-2.5 py-1 text-[11px] text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-zinc-500"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[10px] text-zinc-500 block">Model Name</label>
+                    <input
+                      type="text"
+                      value={modelInput}
+                      onChange={e => setModelInput(e.target.value)}
+                      placeholder="deepseek-chat"
+                      className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-2.5 py-1 text-[11px] text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-zinc-500"
+                    />
+                  </div>
+                  <div className="flex gap-1.5 pt-1">
+                    <button
+                      onClick={() => {
+                        setUrlInput('https://api.deepseek.com/v1')
+                        setModelInput('deepseek-chat')
+                      }}
+                      className="px-2 py-0.5 bg-zinc-800 hover:bg-zinc-700 text-[9px] text-zinc-300 rounded border border-zinc-700"
+                    >
+                      DeepSeek
+                    </button>
+                    <button
+                      onClick={() => {
+                        setUrlInput('https://openrouter.ai/api/v1')
+                        setModelInput('anthropic/claude-sonnet-4')
+                      }}
+                      className="px-2 py-0.5 bg-zinc-800 hover:bg-zinc-700 text-[9px] text-zinc-300 rounded border border-zinc-700"
+                    >
+                      OpenRouter
+                    </button>
+                  </div>
+                </div>
+              )}
+
               <p className="text-[10px] text-zinc-600">
-                {language === 'zh' ? '密钥仅在你的浏览器本地存储。' : 'Key is stored locally in your browser only.'}
+                {language === 'zh' ? '配置参数仅在你的浏览器本地存储。' : 'Settings are stored locally in your browser only.'}
               </p>
             </div>
           ) : loading ? (

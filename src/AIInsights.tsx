@@ -188,6 +188,17 @@ interface Props {
 export default function AIInsights({ data, metrics }: Props) {
   const { language, t } = useTranslation()
   const [apiKey, setApiKey] = useState(() => sessionStorage.getItem('openrouter_key') || '')
+  const [baseUrl, setBaseUrl] = useState(() => {
+    return (import.meta.env.VITE_AI_BASE_URL as string | undefined) || 
+           sessionStorage.getItem('ai_base_url') || 
+           'https://openrouter.ai/api/v1'
+  })
+  const [model, setModel] = useState(() => {
+    return (import.meta.env.VITE_AI_MODEL as string | undefined) || 
+           sessionStorage.getItem('ai_model_name') || 
+           'anthropic/claude-sonnet-4.6'
+  })
+  const [showAdvanced, setShowAdvanced] = useState(false)
   const [messages, setMessages] = useState<ChatMessage[]>(() => loadCache()?.messages || [])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
@@ -263,14 +274,14 @@ export default function AIInsights({ data, metrics }: Props) {
         ...newMessages.map(m => ({ role: m.role as 'user' | 'assistant', content: m.content })),
       ]
 
-      const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+      const res = await fetch(`${baseUrl}/chat/completions`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${apiKey}`,
         },
         body: JSON.stringify({
-          model: 'anthropic/claude-sonnet-4.6',
+          model: model,
           messages: apiMessages,
           max_tokens: 1500,
           stream: true,
@@ -328,7 +339,7 @@ export default function AIInsights({ data, metrics }: Props) {
       setLoading(false)
       setStreamText('')
     }
-  }, [apiKey, loading, messages, dataContext])
+  }, [apiKey, loading, messages, dataContext, baseUrl, model])
 
   const handleCustomSubmit = () => {
     if (customQ.trim()) {
@@ -396,6 +407,71 @@ export default function AIInsights({ data, metrics }: Props) {
           placeholder={localT('placeholderKey')}
           className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-100 placeholder-zinc-600 focus:outline-none focus:border-zinc-500"
         />
+        
+        <div className="flex gap-2 items-center mt-3">
+          <button
+            onClick={() => setShowAdvanced(!showAdvanced)}
+            className="text-[11px] text-zinc-400 hover:text-zinc-300 underline transition-colors"
+          >
+            {language === 'zh' ? (showAdvanced ? '隐藏 API 高级设置' : 'API 高级设置') : (showAdvanced ? 'Hide API Settings' : 'Advanced API Settings')}
+          </button>
+        </div>
+
+        {showAdvanced && (
+          <div className="space-y-3 pt-3 mt-3 border-t border-zinc-800/80">
+            <div className="space-y-1">
+              <label className="text-[10px] text-zinc-500 block font-medium">API Base URL</label>
+              <input
+                type="text"
+                value={baseUrl}
+                onChange={e => {
+                  setBaseUrl(e.target.value)
+                  sessionStorage.setItem('ai_base_url', e.target.value)
+                }}
+                placeholder="https://api.deepseek.com/v1"
+                className="w-full bg-zinc-850 border border-zinc-700 rounded-lg px-3 py-1.5 text-xs text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-zinc-500"
+              />
+            </div>
+            <div className="space-y-1">
+              <label className="text-[10px] text-zinc-500 block font-medium">Model Name</label>
+              <input
+                type="text"
+                value={model}
+                onChange={e => {
+                  setModel(e.target.value)
+                  sessionStorage.setItem('ai_model_name', e.target.value)
+                }}
+                placeholder="deepseek-chat"
+                className="w-full bg-zinc-850 border border-zinc-700 rounded-lg px-3 py-1.5 text-xs text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-zinc-500"
+              />
+            </div>
+            <div className="flex gap-1.5 pt-1">
+              <button
+                onClick={() => {
+                  setBaseUrl('https://api.deepseek.com/v1')
+                  sessionStorage.setItem('ai_base_url', 'https://api.deepseek.com/v1')
+                  setModel('deepseek-chat')
+                  sessionStorage.setItem('ai_model_name', 'deepseek-chat')
+                }}
+                className="px-2.5 py-0.5 bg-zinc-800 hover:bg-zinc-700 text-[10px] text-zinc-300 rounded border border-zinc-700 transition-colors"
+              >
+                DeepSeek
+              </button>
+              <button
+                onClick={() => {
+                  setBaseUrl('https://openrouter.ai/api/v1')
+                  sessionStorage.setItem('ai_base_url', 'https://openrouter.ai/api/v1')
+                  setModel('anthropic/claude-sonnet-4.6')
+                  sessionStorage.setItem('ai_model_name', 'anthropic/claude-sonnet-4.6')
+                }}
+                className="px-2.5 py-0.5 bg-zinc-800 hover:bg-zinc-700 text-[10px] text-zinc-300 rounded border border-zinc-700 transition-colors"
+              >
+                OpenRouter
+              </button>
+            </div>
+          </div>
+        )}
+
         <p className="text-[11px] text-zinc-600 mt-2">{localT('keyNote')}</p>
       </div>
 
@@ -434,7 +510,9 @@ export default function AIInsights({ data, metrics }: Props) {
               {m.role === 'assistant' && (
                 <div className="flex items-center gap-1.5 mb-2">
                   <Sparkles size={12} className="text-purple-400" />
-                  <span className="text-[11px] text-purple-400">Claude</span>
+                  <span className="text-[11px] text-purple-400">
+                    {model.toLowerCase().includes('claude') ? 'Claude' : model.toLowerCase().includes('deepseek') ? 'DeepSeek' : (model.split('/').pop() || 'AI')}
+                  </span>
                 </div>
               )}
               <div className={`text-sm leading-relaxed whitespace-pre-wrap ${
@@ -450,7 +528,9 @@ export default function AIInsights({ data, metrics }: Props) {
             <div className="bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-3">
               <div className="flex items-center gap-1.5 mb-2">
                 <Sparkles size={12} className="text-purple-400" />
-                <span className="text-[11px] text-purple-400">Claude</span>
+                <span className="text-[11px] text-purple-400">
+                  {model.toLowerCase().includes('claude') ? 'Claude' : model.toLowerCase().includes('deepseek') ? 'DeepSeek' : (model.split('/').pop() || 'AI')}
+                </span>
               </div>
               <div className="text-sm leading-relaxed whitespace-pre-wrap text-zinc-300">
                 {streamText}
