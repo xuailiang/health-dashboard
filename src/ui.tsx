@@ -312,12 +312,164 @@ function sampleData(data: unknown[], maxPoints = 60): unknown[] {
   return data.filter((_, i) => i % step === 0)
 }
 
-async function fetchAISummary(title: string, description: string | undefined, data: unknown[], apiKey: string): Promise<string> {
-  const sampled = sampleData(data)
-  const prompt = `You're a friendly health coach talking directly to the user about their personal health data. Speak in second person ("your", "you've", "you're"). Be warm, specific with numbers, and actionable. Keep it to 3-5 sentences. Highlight what's going well, flag anything worth watching, and suggest one concrete thing they could do.
+function parseInline(text: string): React.ReactNode {
+  const parts: React.ReactNode[] = []
+  let current = text
+  let key = 0
 
-Chart: "${title}"${description ? `\nDescription: ${description}` : ''}
-Their data (${data.length} points${data.length > 60 ? ', sampled' : ''}):
+  while (current.length > 0) {
+    const boldIdx = current.indexOf('**')
+    const codeIdx = current.indexOf('`')
+
+    if (boldIdx === -1 && codeIdx === -1) {
+      parts.push(current)
+      break
+    }
+
+    if (boldIdx !== -1 && (codeIdx === -1 || boldIdx < codeIdx)) {
+      if (boldIdx > 0) {
+        parts.push(current.substring(0, boldIdx))
+      }
+      const endBold = current.indexOf('**', boldIdx + 2)
+      if (endBold !== -1) {
+        parts.push(
+          <strong key={key++} className="font-semibold text-zinc-100">
+            {current.substring(boldIdx + 2, endBold)}
+          </strong>
+        )
+        current = current.substring(endBold + 2)
+      } else {
+        parts.push('**')
+        current = current.substring(boldIdx + 2)
+      }
+    } else {
+      if (codeIdx > 0) {
+        parts.push(current.substring(0, codeIdx))
+      }
+      const endCode = current.indexOf('`', codeIdx + 1)
+      if (endCode !== -1) {
+        parts.push(
+          <code key={key++} className="px-1 py-0.5 bg-zinc-800 text-purple-400 font-mono text-[10px] rounded">
+            {current.substring(codeIdx + 1, endCode)}
+          </code>
+        )
+        current = current.substring(endCode + 1)
+      } else {
+        parts.push('`')
+        current = current.substring(codeIdx + 1)
+      }
+    }
+  }
+
+  return <>{parts}</>
+}
+
+function parseMarkdownToReact(text: string): React.ReactNode[] {
+  const lines = text.split('\n')
+  return lines.map((line, idx) => {
+    const content = line.trim()
+    
+    if (content.startsWith('### ')) {
+      return <h4 key={idx} className="text-sm font-semibold text-zinc-200 mt-2 mb-1">{parseInline(line.replace(/^###\s+/, ''))}</h4>
+    }
+    if (content.startsWith('## ')) {
+      return <h3 key={idx} className="text-base font-bold text-zinc-100 mt-3 mb-1">{parseInline(line.replace(/^##\s+/, ''))}</h3>
+    }
+    if (content.startsWith('# ')) {
+      return <h2 key={idx} className="text-lg font-bold text-zinc-50 mt-4 mb-2">{parseInline(line.replace(/^#\s+/, ''))}</h2>
+    }
+
+    if (content.startsWith('- ') || content.startsWith('* ')) {
+      return (
+        <li key={idx} className="ml-4 list-disc text-xs text-zinc-300 my-0.5 leading-relaxed">
+          {parseInline(line.replace(/^[-*]\s+/, ''))}
+        </li>
+      )
+    }
+
+    if (content === '') {
+      return <div key={idx} className="h-1.5" />
+    }
+
+    return (
+      <p key={idx} className="text-xs text-zinc-300 leading-relaxed my-1">
+        {parseInline(line)}
+      </p>
+    )
+  })
+}
+
+function extractContent(body: any): string {
+  if (!body) return ''
+  
+  // 1. OpenAI / DeepSeek / OpenRouter 格式 (有内容时)
+  if (body.choices?.[0]?.message?.content) {
+    return body.choices[0].message.content
+  }
+  
+  // 2. 针对推理模型：如果 content 为空但有推理思考过程且被截断
+  if (body.choices?.[0]?.message?.reasoning_content) {
+    const isLengthTruncated = body.choices[0].finish_reason === 'length'
+    const suffix = isLengthTruncated 
+      ? '\n\n*(注：当前大模型在深度思考推理过程中超出了 Token 限制，以上为其思考草稿。建议调大 max_tokens 或改用非推理模型 deepseek-chat)*' 
+      : ''
+    return body.choices[0].message.reasoning_content + suffix
+  }
+
+  // 3. OpenAI / DeepSeek / OpenRouter 格式
+  if (body.choices?.[0]?.message?.content !== undefined) {
+    return body.choices[0].message.content
+  }
+  
+  // 4. OpenAI 变体 (例如 message.text)
+  if (body.choices?.[0]?.message?.text !== undefined) {
+    return body.choices[0].message.text
+  }
+
+  // 5. OpenAI text 格式
+  if (body.choices?.[0]?.text !== undefined) {
+    return body.choices[0].text
+  }
+  
+  // 6. Gemini 原生格式
+  if (body.candidates?.[0]?.content?.parts?.[0]?.text !== undefined) {
+    return body.candidates[0].content.parts[0].text
+  }
+  
+  // 7. Anthropic Claude 原生格式
+  if (body.content?.[0]?.text !== undefined) {
+    return body.content[0].text
+  }
+  if (typeof body.content === 'string') {
+    return body.content
+  }
+  
+  // 8. 如果是纯文本
+  if (typeof body === 'string') {
+    return body
+  }
+  
+  // 9. 回退
+  return JSON.stringify(body)
+}
+
+async function fetchAISummary(title: string, description: string | undefined, data: unknown[], apiKey: string, language: string): Promise<string> {
+  const sampled = sampleData(data)
+  
+  const promptText = language === 'zh'
+    ? `你是一位友好的健康教练，正在直接向用户分析他们的个人健康数据。请使用第二人称（“你的”、“你”）与用户交流。语气要温暖，结合数据中的具体数字，给出切实可行的建议。请限制在 3-5 句话内。指出进展良好的指标，警示需要留意的异常，并给出一个具体的改善行动方案。你必须使用简体中文进行回复。`
+    : `You're a friendly health coach talking directly to the user about their personal health data. Speak in second person ("your", "you've", "you're"). Be warm, specific with numbers, and actionable. Keep it to 3-5 sentences. Highlight what's going well, flag anything worth watching, and suggest one concrete thing they could do.`
+
+  const chartLabel = language === 'zh' ? '图表名称' : 'Chart'
+  const descLabel = language === 'zh' ? '描述说明' : 'Description'
+  const dataLabel = language === 'zh' ? '历史数据' : 'Their data'
+  const pointLabel = language === 'zh' ? '个数据点' : 'points'
+  const sampledLabel = language === 'zh' ? '已抽样' : 'sampled'
+
+  const prompt = `${promptText}
+
+${chartLabel}: "${title}"${description ? `\n${descLabel}: ${description}` : ''}
+${dataLabel} (${data.length} ${pointLabel}${data.length > 60 ? `，${sampledLabel}` : ''}):
 ${JSON.stringify(sampled, null, 0)}`
 
   const baseUrl = getAiBaseUrl()
@@ -331,7 +483,7 @@ ${JSON.stringify(sampled, null, 0)}`
     },
     body: JSON.stringify({
       model: model,
-      max_tokens: 300,
+      max_tokens: 2000,
       messages: [{ role: 'user', content: prompt }],
     }),
   })
@@ -345,8 +497,17 @@ ${JSON.stringify(sampled, null, 0)}`
     throw new Error((err as { error?: { message?: string } }).error?.message || `API error ${res.status}`)
   }
 
-  const body = await res.json() as { choices: { message: { content: string } }[] }
-  return body.choices[0].message.content
+  const body = await res.json().catch(() => null)
+  if (!body) {
+    throw new Error('Failed to parse API response as JSON.')
+  }
+
+  const content = extractContent(body)
+  if (!content || content.trim() === '') {
+    throw new Error('API returned an empty response. Response payload: ' + JSON.stringify(body))
+  }
+
+  return content
 }
 
 export function AISummaryButton({ title, description, chartData }: {
@@ -388,14 +549,14 @@ export function AISummaryButton({ title, description, chartData }: {
     setLoading(true)
     setError(null)
     try {
-      const result = await fetchAISummary(title, description, chartData, key)
+      const result = await fetchAISummary(title, description, chartData, key, language)
       setSummary(result)
     } catch (e) {
       setError((e as Error).message)
     } finally {
       setLoading(false)
     }
-  }, [title, description, chartData])
+  }, [title, description, chartData, language])
 
   const handleClick = useCallback(() => {
     if (open) { close(); return }
@@ -523,7 +684,9 @@ export function AISummaryButton({ title, description, chartData }: {
             </div>
           ) : summary ? (
             <div className="space-y-2">
-              <p className="text-xs text-zinc-300 leading-relaxed whitespace-pre-wrap">{summary}</p>
+              <div className="text-xs text-zinc-300 leading-relaxed max-h-80 overflow-y-auto pr-1 space-y-1.5">
+                {parseMarkdownToReact(summary)}
+              </div>
               <button onClick={close} className="text-[10px] text-zinc-600 hover:text-zinc-400 transition-colors">
                 {language === 'zh' ? '关闭' : 'Close'}
               </button>
